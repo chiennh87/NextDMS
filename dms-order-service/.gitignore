@@ -1,0 +1,63 @@
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# Go
+# Binary
+dms-order-service
+dms-order-service.exe
+/bin/
+/dist/
+*.exe
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build
+/build/
+/out/
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.docker/
+
+# Secrets (never commit)
+*.pem
+*.key
+credentials.json
+secrets.yaml
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
