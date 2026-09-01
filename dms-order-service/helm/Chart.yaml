@@ -1,0 +1,33 @@
+apiVersion: v2
+name: dms-order-service
+description: DMS Order Service - FMCG Distribution Management System
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.24.0"
+
+keywords:
+  - dms
+  - order-service
+  - fmcg
+  - distribution
+  - gin
+  - golang
+
+home: https://github.com/chiennh87/NextDMS
+sources:
+  - https://github.com/chiennh87/NextDMS/tree/main/dms-order-service
+
+maintainers:
+  - name: DMS Team
+    email: dev@dms.local
+
+dependencies:
+  - name: postgresql
+    version: 12.x.x
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: 17.x.x
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

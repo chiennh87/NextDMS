@@ -1,0 +1,50 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+== Application Info ==
+  App Version:  {{ .Chart.AppVersion }}
+  Chart Version: {{ .Chart.Version }}
+
+== Configuration ==
+  Service:       {{ include "dms-order-service.fullname" . }}
+  Namespace:      {{ .Release.Namespace }}
+  Replicas:      {{ .Values.replicaCount }}
+  Image:         {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+
+== Access ==
+{{- if .Values.ingress.enabled }}
+  API URL:       http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  Port Forward:  kubectl port-forward svc/{{ include "dms-order-service.fullname" . }} 8080:80 -n {{ .Release.Namespace }}
+  Then access:   http://localhost:8080
+{{- end }}
+
+== Health Checks ==
+  Liveness:  {{ .Values.livenessProbe.httpGet.path }}
+  Readiness: {{ .Values.readinessProbe.httpGet.path }}
+  Metrics:   /metrics
+
+== Next Steps ==
+1. Configure database connection:
+   kubectl create secret generic {{ include "dms-order-service.fullname" . }}-db-secret \
+     --from-literal=password=YOUR_DB_PASSWORD -n {{ .Release.Namespace }}
+
+2. Configure Redis password (if needed):
+   kubectl create secret generic {{ include "dms-order-service.fullname" . }}-redis-secret \
+     --from-literal=password=YOUR_REDIS_PASSWORD -n {{ .Release.Namespace }}
+
+3. Install with custom values:
+   helm upgrade --install {{ .Release.Name }} ./helm \
+     --set database.host=your-db-host \
+     --set database.password=your-secure-password \
+     --set redis.host=your-redis-host \
+     --namespace {{ .Release.Namespace }}
+
+== Uninstall ==
+  $ helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}

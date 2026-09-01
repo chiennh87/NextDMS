@@ -1,0 +1,28 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dms-order-service.fullname" . }}
+  labels:
+    {{- include "dms-order-service.labels" . | nindent 4 }}
+    {{- range $key, $value := .Values.monitoring.serviceMonitor.additionalLabels }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  namespace: {{ .Values.monitoring.serviceMonitor.namespace | default $.Release.Namespace }}
+spec:
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
+      tlsConfig:
+        {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 6 }}
+      {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dms-order-service.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+{{- end }}

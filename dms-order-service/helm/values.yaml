@@ -1,0 +1,220 @@
+# Default values for dms-order-service
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Number of replicas
+replicaCount: 3
+
+image:
+  repository: chiennh87/dms-order-service
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: api.dms.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: dms-api-tls
+      hosts:
+        - api.dms.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Horizontal Pod Autoscaler behavior
+behavior:
+  scaleDown:
+    stabilizationWindowSeconds: 300
+    policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+  scaleUp:
+    stabilizationWindowSeconds: 30
+    policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+
+# Node selector for pod assignment
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Application configuration
+env:
+  APP_ENV: production
+  LOG_LEVEL: info
+  HTTP_PORT: 8080
+  GIN_MODE: release
+
+# Database configuration
+database:
+  host: ""
+  port: 5432
+  name: dms_order
+  user: dms
+  password: ""
+  sslmode: require
+  maxConnections: 25
+  minConnections: 5
+  maxConnLifetime: 3600s
+  maxConnIdleTime: 1800s
+
+# Redis configuration
+redis:
+  host: ""
+  port: 6379
+  password: ""
+  db: 0
+  poolSize: 50
+  minIdleConns: 10
+  timeout: 200ms
+  readTimeout: 100ms
+  writeTimeout: 100ms
+
+# Kafka configuration
+kafka:
+  brokers: ""
+  topic: orders
+  consumerGroup: dms-order-service
+  compressionType: snappy
+  batchSize: 100
+  batchTimeout: 10ms
+
+# Rate limiting
+rateLimit:
+  requestsPerMinute: 30
+  burst: 5
+
+# Monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+
+# Sentry configuration
+sentry:
+  enabled: false
+  dsn: ""
+  environment: production
+  tracesSampleRate: 0.1
+  release: ""
+
+# Enable PostgreSQL dependency
+postgresql:
+  enabled: false
+  auth:
+    username: dms
+    password: ""
+    database: dms_order
+  primary:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+# Enable Redis dependency
+redis:
+  enabled: false
+  auth:
+    password: ""
+  master:
+    persistence:
+      size: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# Probes
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /readyz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Update strategy
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0

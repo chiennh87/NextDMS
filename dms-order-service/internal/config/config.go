@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,16 @@ type Config struct {
 
 	// Rate limiting (requests per minute per IP)
 	RateLimitPerMinute int
+
+	// Sentry (error tracking)
+	SentryDSN              string
+	SentryEnvironment      string
+	SentryTracesSampleRate float64
+	SentryEnabled          bool
+
+	// Service metadata
+	ServiceName    string
+	ServiceVersion string
 }
 
 // Load đọc cấu hình từ biến môi trường. Cung cấp giá trị mặc định
@@ -46,6 +57,16 @@ func Load() (*Config, error) {
 		KafkaTopic:         envOrDefault("KAFKA_TOPIC", "dms.orders.v1"),
 		OrderTimeout:       time.Duration(envIntDefault("ORDER_TIMEOUT_SEC", 5)) * time.Second,
 		RateLimitPerMinute: envIntDefault("RATE_LIMIT_PER_MINUTE", 30),
+
+		// Sentry
+		SentryDSN:              os.Getenv("SENTRY_DSN"),
+		SentryEnvironment:      envOrDefault("SENTRY_ENV", "production"),
+		SentryTracesSampleRate: envFloatDefault("SENTRY_TRACES_SAMPLE_RATE", 0.1),
+		SentryEnabled:          os.Getenv("SENTRY_DSN") != "",
+
+		// Service metadata
+		ServiceName:    envOrDefault("SERVICE_NAME", "dms-order-service"),
+		ServiceVersion: envOrDefault("SERVICE_VERSION", "1.0.0"),
 	}
 	if c.PostgresDSN == "" || c.RedisAddr == "" {
 		return nil, fmt.Errorf("POSTGRES_DSN và REDIS_ADDR là bắt buộc")
@@ -65,6 +86,15 @@ func envIntDefault(key string, def int) string {
 		return v
 	}
 	return strconv.Itoa(def)
+}
+
+func envFloatDefault(key string, def float64) float64 {
+	if v, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return def
 }
 
 func splitCSV(s string) []string {

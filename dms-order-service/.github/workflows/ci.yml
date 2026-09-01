@@ -91,15 +91,18 @@ jobs:
           name: coverage-report
           path: coverage.html
 
-  # 3. Build - Docker image build
+  # 3. Build - Multi-platform Docker image build
   build:
-    name: Build Docker Image
+    name: Build Docker Image (Multi-platform)
     runs-on: ubuntu-latest
     needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -120,15 +123,46 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
+      # Build and push multi-platform images (amd64, arm64)
+      - name: Build and push (amd64)
         uses: docker/build-push-action@v5
         with:
           context: ./dms-order-service
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}-amd64
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,scope=amd64,mode=max
+          build-args: |
+            TARGETPLATFORM=linux/amd64
+
+      - name: Build and push (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dms-order-service
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}-arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,scope=arm64,mode=max
+          build-args: |
+            TARGETPLATFORM=linux/arm64
+
+      # Create manifest for multi-platform support
+      - name: Create and push manifest
+        run: |
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }} \
+            --amend ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }}-amd64 \
+            --amend ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }}-arm64
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }}
+
+          # Also update latest tag
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:latest \
+            --amend ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }}-amd64 \
+            --amend ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.ref_name }}-arm64
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:latest
 
   # 4. Deploy - Deploy to staging
   deploy-staging:
