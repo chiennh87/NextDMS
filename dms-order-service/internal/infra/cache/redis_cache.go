@@ -20,7 +20,8 @@ type redisCache struct {
 
 // NewRedisCache khởi tạo Redis client. Cấu hình pool connection tối ưu
 // cho traffic cao: pipeline batch nếu cần, timeout 200ms.
-func NewRedisCache(addr, password string, db int) (*redisCache, error) {
+// Trả về cả cache và client để HealthHandler có thể check Redis connectivity.
+func NewRedisCache(addr, password string, db int) (*redisCache, *redis.Client, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         addr,
 		Password:     password,
@@ -35,9 +36,9 @@ func NewRedisCache(addr, password string, db int) (*redisCache, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("redis ping: %w", err)
+		return nil, nil, fmt.Errorf("redis ping: %w", err)
 	}
-	return &redisCache{client: client, ttl: 5 * time.Minute}, nil
+	return &redisCache{client: client, ttl: 5 * time.Minute}, client, nil
 }
 
 // CheckStock kiểm tra xem SKU có đủ số lượng trong cache hay không.

@@ -22,10 +22,11 @@ type postgresOrderRepository struct {
 // NewPostgresOrderRepository tạo pool kết nối PG. Pool được thiết kế để
 // tối ưu cho traffic cao: 1 pool chia sẻ cho toàn bộ instance (stateless),
 // không mở kết nối mới cho mỗi request.
-func NewPostgresOrderRepository(dsn string) (*postgresOrderRepository, error) {
+// Trả về cả repository và pool để HealthHandler có thể check DB connectivity.
+func NewPostgresOrderRepository(dsn string) (*postgresOrderRepository, *pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("parse postgres DSN: %w", err)
+		return nil, nil, fmt.Errorf("parse postgres DSN: %w", err)
 	}
 	// Tối ưu pool cho traffic cao (1000 salesman, 100k outlets, peak 8h-10h)
 	cfg.MaxConns = 50
@@ -35,9 +36,9 @@ func NewPostgresOrderRepository(dsn string) (*postgresOrderRepository, error) {
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create postgres pool: %w", err)
+		return nil, nil, fmt.Errorf("create postgres pool: %w", err)
 	}
-	return &postgresOrderRepository{db: pool}, nil
+	return &postgresOrderRepository{db: pool}, pool, nil
 }
 
 // Create lưu 1 order mới vào DB. Sử dụng transaction để đảm bảo tính
