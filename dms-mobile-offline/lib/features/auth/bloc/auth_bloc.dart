@@ -1,9 +1,14 @@
-﻿import 'package:flutter_bloc/flutter_bloc.dart';
+// AuthBloc - xu ly login, logout, auth status
+// Enterprise: Luu UserSession voi distributor_id, territory_id (Data Isolation)
+
+import 'dart:convert';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../repository/auth_repository.dart';
+import '../models/user_session.dart';
 
-// ===================== EVENTS =====================
+// ============ EVENTS ============
 
 abstract class AuthEvent extends Equatable {
   const AuthEvent();
@@ -31,7 +36,7 @@ class LogoutEvent extends AuthEvent {
   List<Object?> get props => [logoutAll];
 }
 
-// ===================== STATES =====================
+// ============ STATES ============
 
 abstract class AuthState extends Equatable {
   const AuthState();
@@ -48,12 +53,11 @@ class AuthLoading extends AuthState {
 }
 
 class AuthAuthenticated extends AuthState {
-  final String username;
-  final String displayName;
-  final String accessToken;
-  const AuthAuthenticated({required this.username, required this.displayName, required this.accessToken});
+  // Enterprise: Session chua distributor_id + territory_id cho Data Isolation
+  final UserSession session;
+  const AuthAuthenticated(this.session);
   @override
-  List<Object?> get props => [username, displayName, accessToken];
+  List<Object?> get props => [session.userId, session.username];
 }
 
 class AuthError extends AuthState {
@@ -74,7 +78,7 @@ class AuthLoggedOut extends AuthState {
   List<Object?> get props => [message];
 }
 
-// ===================== BLOC =====================
+// ============ BLOC ============
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository repository;
@@ -89,15 +93,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   Future<void> _onLogin(LoginEvent event, Emitter<AuthState> emit) async {
     emit(const AuthLoading());
     try {
-      final response = await repository.login(username: event.username, password: event.password, deviceId: event.deviceId);
-      await storage.writeAccessToken(response['access_token']);
-      await storage.writeRefreshToken(response['refresh_token']);
-      await storage.writeUsername(event.username);
-      emit(AuthAuthenticated(
+      final response = await repository.login(
         username: event.username,
-        displayName: response['user']?['display_name'] ?? event.username,
-        accessToken: response['access_token'],
-      ));
+        password: event.password,
+        deviceId: event.deviceId,
+      );
+
+      await storage.writeAccessToken(response['access_token'] as String);
+      await storage.writeRefreshToken(response['refresh_token'] as String);
+      await storage.writeUsername(event.username);
+
+      // Enterprise: Tao UserSession voi scoping
+      final session = UserSession.fromJson(response['user'] as Map<String, dynamic>? ?? {});
+      await storage.writeUserSession(jsonEncode(response['user']));
+      await storage.writeUserId(session.userId.toString());
+
+      emit(AuthAuthenticated(session));
     } catch (e) {
       String msg = e.toString();
       if (msg.contains('network') || msg.contains('SocketException')) {
@@ -115,8 +126,21 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   Future<void> _onCheckAuthStatus(CheckAuthStatusEvent event, Emitter<AuthState> emit) async {
     final token = await storage.readAccessToken();
     if (token != null) {
+      // Thu build UserSession tu local storage
+      final sessionJson = await storage.readUserSession();
+      if (sessionJson != null) {
+        try {
+          final session = UserSession.fromJson(jsonDecode(sessionJson) as Map<String, dynamic>);
+          emit(AuthAuthenticated(session));
+          return;
+        } catch (_) {}
+      }
+      // Fallback: tao session co ban
       final username = await storage.readUsername() ?? 'unknown';
-      emit(AuthAuthenticated(username: username, displayName: username, accessToken: token));
+      emit(AuthAuthenticated(UserSession(
+        userId: 0, username: username, fullName: username,
+        distributorId: 1, territoryId: 1, role: 'SALES_REP',
+      )));
     } else {
       emit(const AuthInitial());
     }

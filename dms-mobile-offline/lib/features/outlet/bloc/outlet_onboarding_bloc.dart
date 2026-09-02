@@ -1,6 +1,11 @@
-﻿// Outlet Onboarding Bloc
+// OutletOnboardingBloc - Enterprise FMCG - Offline-First + Approval Workflow
+
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:uuid/uuid.dart';
+import '../../core/storage/local_db.dart';
+import '../../core/storage/sync_service.dart';
 import '../models/outlet_dto.dart';
 import '../models/value_set_model.dart';
 import '../models/duplicate_check_model.dart';
@@ -9,129 +14,157 @@ import '../repository/outlet_repository.dart';
 import 'outlet_onboarding_event.dart';
 import 'outlet_onboarding_state.dart';
 
-class OutletOnboardingBloc extends Bloc<OutletOnboardingEvent, OutletOnboardingState> {
+/// OutletOnboardingBloc - toan bo business logic cho mo moi diem ban
+class OutletOnboardingBloc
+    extends Bloc<OutletOnboardingEvent, OutletOnboardingState> {
   final OutletRepository repository;
-  OutletOnboardingBloc({required this.repository}) : super(const OutletOnboardingInitial()) {
+  final LocalDb? localDb;
+  final SyncService? syncService;
+  final _uuid = const Uuid();
+
+  Timer? _duplicateCheckDebounce;
+
+  OutletOnboardingBloc({
+    required this.repository,
+    this.localDb,
+    this.syncService,
+  }) : super(const OutletOnboardingInitial()) {
     on<OutletOnboardingInitialized>(_onInit);
+    on<OutletFormUpdated>(_onFormUpdated);
     on<OutletProvinceSelected>(_onProvinceSelected);
     on<OutletDistrictSelected>(_onDistrictSelected);
     on<OutletWardSelected>(_onWardSelected);
     on<OutletCustomerTypeSelected>(_onCustomerTypeSelected);
     on<OutletCustomerChannelSelected>(_onCustomerChannelSelected);
+    on<OutletTierSelected>(_onTierSelected);
     on<OutletGpsCaptureRequested>(_onGpsCapture);
     on<OutletPhotoUploaded>(_onPhotoUploaded);
     on<OutletDuplicateCheckRequested>(_onDuplicateCheck);
+    on<_DuplicateCheckInternal>(_onDuplicateCheckInternal);
     on<OutletDuplicateCheckIgnored>(_onDuplicateIgnored);
     on<OutletOnboardingSubmitted>(_onSubmit);
-    on<OutletOnboardingReset>(_onReset);
+    on<OutletDraftSavedLocally>(_onDraftSavedLocally);
+    on<OutletSyncRequested>(_onSyncRequested);
+    on<OutletSyncRetryRequested>(_onSyncRetryRequested);
+    on<OutletDraftsRequested>(_onDraftsRequested);
   }
 
   Future<void> _onInit(OutletOnboardingInitialized event, Emitter<OutletOnboardingState> emit) async {
-    emit(const OutletOnboardingLoading());
+    emit(const OutletOnboardingLoading(message: 'Dang tai du lieu...'));
     try {
-      final r = await Future.wait([repository.getProvinces(), repository.getValueSetValues('CUSTOMER_TYPE'), repository.getValueSetValues('CUSTOMER_CHANNEL')]);
-      final ct = (r[1] as List<ValueSetValueModel>).where((v) => v.isValidNow).toList();
-      final cc = (r[2] as List<ValueSetValueModel>).where((v) => v.isValidNow).toList();
-      emit(OutletOnboardingReady(formData: const OutletCreateRequestDTO(), provinces: r[0] as List<AddressModel>, customerTypes: ct, customerChannels: cc));
-    } catch (e) { emit(OutletOnboardingError('Lỗi tải: $e')); }
+      final countries = await repository.getCountries();
+      final bizTypes = await repository.getBusinessTypes();
+      final customerTypes = await repository.getCustomerTypes();
+      final channels = await repository.getChannels();
+      final provinces = await repository.getProvincesByCountry('VNM');
+      emit(OutletOnboardingReady(formData: OutletCreateRequestDTO.defaults(), countries: countries, businessTypes: bizTypes, customerTypes: customerTypes, channels: channels, provinces: provinces, selectedCountry: 'VNM', selectedBizType: 'HOP_KINH_DOANH'));
+    } catch (e) { emit(OutletOnboardingError(message: 'Tai du lieu that bai: $e')); }
   }
-
+  void _onFormUpdated(OutletFormUpdated event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(formData: event.formData)); }
   Future<void> _onProvinceSelected(OutletProvinceSelected event, Emitter<OutletOnboardingState> emit) async {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(provinceCode: event.province.code, districtCode: null, wardCode: null), districts: const [], wards: const []));
+    final s = state; if (s is! OutletOnboardingReady) return;
+    emit(s.copyWith(selectedProvince: event.provinceCode, selectedDistrict: null, selectedWard: null, districts: const [], wards: const []));
+    try { final districts = await repository.getDistrictsByProvince(event.provinceCode); final st = state; if (st is OutletOnboardingReady) emit(st.copyWith(districts: districts)); } catch (e) {}
+
+
+  // Offline Draft + Sync Handlers
+  Future<void> _onDraftSavedLocally(OutletDraftSavedLocally event, Emitter<OutletOnboardingState> emit) async {
+    if (localDb == null) { emit(OutletOnboardingFailure(message: 'Khong co localDb - khong the luu nhap')); return; }
+    final localId = _uuid.v4();
+    final draft = LocalOutletDraft(localId: localId, formDataJson: event.formData.toJson().toString(), createdAt: DateTime.now(), syncStatus: 'PENDING');
     try {
-      final d = await repository.getDistrictsByProvince(event.province.code!);
-      if (state is OutletOnboardingReady) emit((state as OutletOnboardingReady).copyWith(districts: d));
-    } catch (_) {}
+      await localDb!.saveDraft(draft);
+      emit(OutletDraftSaved(localId: localId));
+      final s = state;
+      if (s is OutletOnboardingReady) emit(s);
+    } catch (e) { emit(OutletOnboardingFailure(message: 'Luu nhap that bai: $e')); }
   }
 
-  Future<void> _onDistrictSelected(OutletDistrictSelected event, Emitter<OutletOnboardingState> emit) async {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(districtCode: event.district.code, wardCode: null), wards: const []));
+  Future<void> _onSyncRequested(OutletSyncRequested event, Emitter<OutletOnboardingState> emit) async {
+    if (localDb == null || syncService == null) { emit(OutletOnboardingFailure(message: 'Sync khong kha dung')); return; }
     try {
-      final w = await repository.getWardsByDistrict(event.district.code!);
-      if (state is OutletOnboardingReady) emit((state as OutletOnboardingReady).copyWith(wards: w));
-    } catch (_) {}
+      final pending = await localDb!.getPendingDrafts();
+      if (pending.isEmpty) { emit(OutletOnboardingSuccess(outletId: 0, outletCode: '', message: 'Khong co draft cho dong bo')); return; }
+      emit(OutletSyncing(pendingCount: pending.length));
+      int synced = 0; int failed = 0;
+      for (final draft in pending) {
+        try {
+          final dto = _decodeDto(draft.formDataJson);
+          if (dto == null) { await localDb!.updateSyncStatus(draft.localId, 'FAILED'); failed++; continue; }
+          final result = await repository.syncOutlet(dto.copyWith(localId: draft.localId));
+          if (result != null) { await localDb!.updateSyncStatus(draft.localId, 'SYNCED'); synced++; } else { await localDb!.updateSyncStatus(draft.localId, 'FAILED'); failed++; }
+        } catch (e) { await localDb!.updateSyncStatus(draft.localId, 'FAILED'); failed++; }
+      }
+      emit(OutletSyncCompleted(syncedCount: synced, failedCount: failed));
+    } catch (e) { emit(OutletOnboardingFailure(message: 'Dong bo that bai: $e')); }
   }
 
-  void _onWardSelected(OutletWardSelected event, Emitter<OutletOnboardingState> emit) {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(wardCode: event.ward.code)));
-  }
-
-  void _onCustomerTypeSelected(OutletCustomerTypeSelected event, Emitter<OutletOnboardingState> emit) {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(customerTypeCode: event.customerType.code)));
-  }
-
-  void _onCustomerChannelSelected(OutletCustomerChannelSelected event, Emitter<OutletOnboardingState> emit) {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(customerChannelCode: event.customerChannel.code)));
-  }
-
-  Future<void> _onGpsCapture(OutletGpsCaptureRequested event, Emitter<OutletOnboardingState> emit) async {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
+  Future<void> _onSyncRetryRequested(OutletSyncRetryRequested event, Emitter<OutletOnboardingState> emit) async {
+    if (localDb == null) { emit(OutletOnboardingFailure(message: 'LocalDb khong kha dung')); return; }
     try {
-      LocationPermission p = await Geolocator.checkPermission();
-      if (p == LocationPermission.denied) { p = await Geolocator.requestPermission(); if (p == LocationPermission.denied) { emit(OutletOnboardingFailure(s.formData, 'Quyền vị trí bị từ chối')); emit(s); return; } }
-      if (p == LocationPermission.deniedForever) { emit(OutletOnboardingFailure(s.formData, 'Bật quyền vị trí')); emit(s); return; }
-      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 10));
-      if (pos.accuracy > 20) { emit(OutletOnboardingFailure(s.formData, 'GPS: ${pos.accuracy.toStringAsFixed(1)}m')); emit(s); return; }
-      emit(s.copyWith(formData: s.formData.copyWith(latitude: pos.latitude, longitude: pos.longitude), currentPosition: pos));
-    } catch (e) { emit(OutletOnboardingFailure(s.formData, 'Lỗi GPS: $e')); emit(s); }
+      final failed = await localDb!.getPendingDrafts();
+      if (failed.isEmpty) { emit(OutletOnboardingSuccess(outletId: 0, outletCode: '', message: 'Khong co draft loi')); return; }
+      emit(OutletSyncing(pendingCount: failed.length));
+      int synced = 0; int failedCount = 0;
+      for (final draft in failed) {
+        try {
+          final dto = _decodeDto(draft.formDataJson);
+          if (dto == null) { failedCount++; continue; }
+          final result = await repository.syncOutlet(dto.copyWith(localId: draft.localId));
+          if (result != null) { await localDb!.updateSyncStatus(draft.localId, 'SYNCED'); synced++; } else { failedCount++; }
+        } catch (e) { failedCount++; }
+      }
+      emit(OutletSyncCompleted(syncedCount: synced, failedCount: failedCount));
+    } catch (e) { emit(OutletOnboardingFailure(message: 'Retry that bai: $e')); }
   }
 
-  void _onPhotoUploaded(OutletPhotoUploaded event, Emitter<OutletOnboardingState> emit) {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(s.copyWith(formData: s.formData.copyWith(photoUrl: event.photoUrl), photoUrl: event.photoUrl));
+  Future<void> _onDraftsRequested(OutletDraftsRequested event, Emitter<OutletOnboardingState> emit) async {
+    if (localDb == null) { emit(OutletDraftsLoaded(drafts: [])); return; }
+    emit(const OutletDraftsLoading());
+    try { final drafts = await localDb!.getPendingDrafts(); emit(OutletDraftsLoaded(drafts: drafts)); } catch (e) { emit(OutletDraftsLoaded(drafts: [])); }
   }
 
-  Future<void> _onDuplicateCheck(OutletDuplicateCheckRequested event, Emitter<OutletOnboardingState> emit) async {
-    if (state is! OutletOnboardingReady) return;
-    final s = state as OutletOnboardingReady;
-    emit(OutletDuplicateChecking(event.formData));
-    try {
-      final r = await repository.checkDuplicate(phone: event.formData.phone, zaloPhone: event.formData.zaloPhone, taxCode: event.formData.taxCode, identityCardNumber: event.formData.identityCardNumber, latitude: event.formData.latitude, longitude: event.formData.longitude);
-      if (r.hasDuplicate) emit(OutletDuplicateFound(event.formData, r));
-      else add(OutletOnboardingSubmitted(event.formData));
-    } catch (e) { emit(OutletOnboardingFailure(event.formData, 'Lỗi trùng: $e')); emit(s); }
-  }
+  // Helpers
+  OutletCreateRequestDTO? _decodeDto(String json) { try { return OutletCreateRequestDTO.fromJson({}); } catch (e) { return null; } }
 
-  void _onDuplicateIgnored(OutletDuplicateCheckIgnored event, Emitter<OutletOnboardingState> emit) {
-    if (state is! OutletDuplicateFound) return;
-    add(OutletOnboardingSubmitted((state as OutletDuplicateFound).formData));
-  }
-
-  Future<void> _onSubmit(OutletOnboardingSubmitted event, Emitter<OutletOnboardingState> emit) async {
-    emit(OutletOnboardingSubmitting(event.formData));
-    try {
-      final err = _validate(event.formData);
-      if (err != null) { emit(OutletOnboardingFailure(event.formData, err)); return; }
-      final r = await repository.createOutlet(event.formData);
-      emit(OutletOnboardingSuccess(r, 'Tạo thành công!'));
-    } catch (e) { emit(OutletOnboardingFailure(event.formData, 'Lỗi: $e')); }
-  }
-
-  String? _validate(OutletCreateRequestDTO f) {
-    if ((f.name ?? '').isEmpty) return 'Nhập tên điểm bán';
-    if ((f.phone ?? '').isEmpty || !repository.isValidVietnamPhone(f.phone!)) return 'SĐT không hợp lệ';
-    if ((f.zaloPhone ?? '').isNotEmpty && !repository.isValidZalo(f.zaloPhone!)) return 'Zalo không hợp lệ';
-    if ((f.identityCardNumber ?? '').isNotEmpty && !repository.isValidIdCard(f.identityCardNumber!)) return 'CCCD 9/12 số';
-    if ((f.taxCode ?? '').isNotEmpty && !repository.isValidTaxCode(f.taxCode!)) return 'MST 10/13 số';
-    if (f.latitude == null || f.longitude == null) return 'Lấy GPS';
-    if ((f.photoUrl ?? '').isEmpty) return 'Chụp ảnh mặt tiền';
-    if ((f.provinceCode ?? '').isEmpty) return 'Chọn Tỉnh';
-    if ((f.districtCode ?? '').isEmpty) return 'Chọn Quận';
-    if ((f.wardCode ?? '').isEmpty) return 'Chọn Phường';
-    return null;
-  }
-
-  void _onReset(OutletOnboardingReset event, Emitter<OutletOnboardingState> emit) => add(const OutletOnboardingInitialized());
+  @override
+  Future<void> close() { _duplicateCheckDebounce?.cancel(); return super.close(); }
 }
+
+class _DuplicateCheckInternal extends OutletOnboardingEvent {
+  final OutletCreateRequestDTO formData;
+  const _DuplicateCheckInternal(this.formData);
+}
+  }
+  Future<void> _onDistrictSelected(OutletDistrictSelected event, Emitter<OutletOnboardingState> emit) async {
+    final s = state; if (s is! OutletOnboardingReady) return;
+    emit(s.copyWith(selectedDistrict: event.districtCode, selectedWard: null, wards: const []));
+    try { final wards = await repository.getWardsByDistrict(event.districtCode); final st = state; if (st is OutletOnboardingReady) emit(st.copyWith(wards: wards)); } catch (e) {}
+  }
+  void _onWardSelected(OutletWardSelected event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(selectedWard: event.wardCode)); }
+  void _onCustomerTypeSelected(OutletCustomerTypeSelected event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(selectedCustomerType: event.customerTypeCode)); }
+  void _onCustomerChannelSelected(OutletCustomerChannelSelected event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(selectedChannel: event.channelCode)); }
+  void _onTierSelected(OutletTierSelected event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(selectedTier: event.tierCode)); }
+  Future<void> _onGpsCapture(OutletGpsCaptureRequested event, Emitter<OutletOnboardingState> emit) async {
+    final s = state; if (s is! OutletOnboardingReady) return;
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) { final req = await Geolocator.requestPermission(); if (req == LocationPermission.denied || req == LocationPermission.deniedForever) { emit(OutletOnboardingError(message: 'Khong co quyen truy cap vi tri')); emit(s); return; } }
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 10));
+      emit(s.copyWith(formData: s.formData.copyWith(latitude: pos.latitude, longitude: pos.longitude)));
+    } catch (e) { emit(OutletOnboardingError(message: 'Khong lay duoc GPS: $e')); emit(s); }
+  }
+  void _onPhotoUploaded(OutletPhotoUploaded event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(formData: s.formData.copyWith(photoUrl: event.photoPath))); }
+  Future<void> _onDuplicateCheck(OutletDuplicateCheckRequested event, Emitter<OutletOnboardingState> emit) async { _duplicateCheckDebounce?.cancel(); _duplicateCheckDebounce = Timer(const Duration(milliseconds: 300), () => add(_DuplicateCheckInternal(event.formData))); }
+  Future<void> _onDuplicateCheckInternal(_DuplicateCheckInternal event, Emitter<OutletOnboardingState> emit) async {
+    final s = state; if (s is! OutletOnboardingReady) return;
+    emit(const OutletDuplicateChecking());
+    try { final result = await repository.checkDuplicate(event.formData); final st = state; if (st is OutletOnboardingReady) { if (result.isDuplicate) { emit(OutletDuplicateFound(duplicateResult: result)); } else { emit(st); } } } catch (e) { final st = state; if (st is OutletOnboardingReady) emit(st); }
+  }
+  void _onDuplicateIgnored(OutletDuplicateCheckIgnored event, Emitter<OutletOnboardingState> emit) { final s = state; if (s is OutletOnboardingReady) emit(s.copyWith(duplicateIgnored: true)); }
+  Future<void> _onSubmit(OutletOnboardingSubmitted event, Emitter<OutletOnboardingState> emit) async {
+    final s = state; if (s is! OutletOnboardingReady) return;
+    if (!s.duplicateIgnored) { emit(const OutletDuplicateChecking()); try { final dupResult = await repository.checkDuplicate(s.formData); if (dupResult.isDuplicate) { emit(OutletDuplicateFound(duplicateResult: dupResult)); return; } } catch (e) {} emit(s.copyWith(duplicateIgnored: true)); }
+    emit(const OutletOnboardingSubmitting());
+    try { final result = await repository.createOutlet(s.formData); emit(OutletOnboardingSuccess(outletId: result.id, outletCode: result.code, message: 'Tao diem ban thanh cong! Cho duyet.')); } catch (e) { emit(OutletOnboardingFailure(message: 'Tao diem ban that bai: $e')); }
+  }

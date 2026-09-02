@@ -37,9 +37,34 @@ class SecureStorage {
     await p.setString(_kUserId, userId);
   }
 
+/// Đọc userId và convert sang int (trả về null nếu chưa login hoặc lỗi parse).
+/// Dùng cho trường hợp cần int64 (BIGINT) để gắn vào request body (createdBy).
+Future<int?> readUserIdInt() async {
+  final raw = await readUserId();
+  if (raw == null || raw.isEmpty) return null;
+  return int.tryParse(raw);
+}
+
   Future<void> writePin(String pin) async {
     final p = await _prefs;
     await p.setString(_kPinHash, _hash(pin));
+  }
+
+  // ============ Enterprise: User Session (Scoping) ============
+
+  static const _kUserSession = 'sec_user_session';
+
+  /// Luu toan bo user session (bao gom distributor_id, territory_id)
+  /// Dung cho Data Isolation - moi API call se gui scoping
+  Future<void> writeUserSession(String json) async {
+    final p = await _prefs;
+    await p.setString(_kUserSession, json);
+  }
+
+  /// Doc user session dang JSON string
+  Future<String?> readUserSession() async {
+    final p = await _prefs;
+    return p.getString(_kUserSession);
   }
 
   Future<bool> verifyPin(String pin) async {

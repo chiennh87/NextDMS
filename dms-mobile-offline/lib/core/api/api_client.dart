@@ -1,90 +1,158 @@
-﻿import 'dart:async';
+// ============================================================================
+// ApiClient (HTTP client with auth + error handling)
+// Updated to support multipart upload and base64 photo
+// ============================================================================
+
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 
-/// HTTP API client with token injection and timeout.
+/// Custom exception cho API errors
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+  final dynamic data;
+
+  ApiException(this.statusCode, this.message, [this.data]);
+
+  @override
+  String toString() => 'ApiException($statusCode): $message';
+}
+
+/// HTTP Client với timeout, auth header injection, error handling
 class ApiClient {
   final String baseUrl;
   final Duration timeout;
   String? _accessToken;
-  final http.Client _client;
 
-  ApiClient({required this.baseUrl, this.timeout = const Duration(seconds: 15), http.Client? client})
-      : _client = client ?? http.Client();
+  ApiClient({
+    required this.baseUrl,
+    this.timeout = const Duration(seconds: 15),
+  });
 
+  /// Set access token (gọi sau khi login thành công)
   void setAccessToken(String? token) {
     _accessToken = token;
   }
 
-  Map<String, String> _headers(Map<String, String>? extra) {
-    final h = <String, String>{
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
-    if (_accessToken != null) h['Authorization'] = 'Bearer $_accessToken';
-    if (extra != null) h.addAll(extra);
-    return h;
+  /// Lấy headers chung, tự động thêm Authorization
+  Map<String, String> _getHeaders({bool needJson = true}) {
+    final headers = <String, String>{};
+    if (needJson) headers['Content-Type'] = 'application/json; charset=UTF-8';
+    headers['Accept'] = 'application/json';
+    if (_accessToken != null && _accessToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_accessToken';
+    }
+    return headers;
   }
 
-  Uri _uri(String path) {
-    if (path.startsWith('http')) return Uri.parse(path);
-    final sep = path.startsWith('/') ? '' : '/';
-    return Uri.parse('$baseUrl$sep$path');
-  }
-
-  Future<dynamic> get(String path, {Map<String, String>? headers, Map<String, String>? query}) async {
-    final uri = _uri(path);
-    final qp = (query == null || query.isEmpty) ? uri : uri.replace(queryParameters: {...uri.queryParameters, ...query});
-    final res = await _client.get(qp, headers: _headers(headers)).timeout(timeout);
-    return _parse(res);
-  }
-
-  Future<dynamic> post(String path, {dynamic body, Map<String, String>? headers}) async {
-    final res = await _client
-        .post(_uri(path), headers: _headers(headers), body: body == null ? null : jsonEncode(body))
-        .timeout(timeout);
-    return _parse(res);
-  }
-
-  Future<dynamic> put(String path, {dynamic body, Map<String, String>? headers}) async {
-    final res = await _client
-        .put(_uri(path), headers: _headers(headers), body: body == null ? null : jsonEncode(body))
-        .timeout(timeout);
-    return _parse(res);
-  }
-
-  Future<dynamic> delete(String path, {Map<String, String>? headers}) async {
-    final res = await _client.delete(_uri(path), headers: _headers(headers)).timeout(timeout);
-    return _parse(res);
-  }
-
-  dynamic _parse(http.Response res) {
-    final code = res.statusCode;
-    final body = res.body;
-    if (code >= 200 && code < 300) {
-      if (body.isEmpty) return <String, dynamic>{};
-      try {
-        return jsonDecode(body);
-      } catch (_) {
-        return body;
+  /// Build full URL từ path
+  Uri _buildUri(String path, [Map<String, dynamic>? queryParams]) {
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    var uri = Uri.parse('$baseUrl/$cleanPath');
+    if (queryParams != null) {
+      queryParams.removeWhere((k, v) => v == null);
+      if (queryParams.isNotEmpty) {
+        uri = uri.replace(queryParameters: {
+          ...uri.queryParameters,
+          ...queryParams.map((k, v) => MapEntry(k, v.toString())),
+        });
       }
     }
-    String msg = 'HTTP $code';
-    try {
-      final j = jsonDecode(body);
-      if (j is Map && j['message'] != null) msg = j['message'].toString();
-      else if (j is Map && j['error'] != null) msg = j['error'].toString();
-    } catch (_) {}
-    throw ApiException(code, msg);
+    return uri;
   }
 
-  void close() => _client.close();
-}
+  /// Xử lý response: kiểm tra status, parse JSON, throw exception nếu lỗi
+  Map<String, dynamic> _handleResponse(http.Response response) {
+    final body = response.body.isNotEmpty
+        ? jsonDecode(utf8.decode(response.bodyBytes))
+        : <String, dynamic>{};
 
-class ApiException implements Exception {
-  final int statusCode;
-  final String message;
-  ApiException(this.statusCode, this.message);
-  @override
-  String toString() => 'ApiException($statusCode): $message';
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return body is Map<String, dynamic> ? body : {'data': body};
+    }
+
+    // Trích xuất message lỗi từ backend Go (thường là {error: "...", message: "..."})
+    String errorMessage = body['message'] ?? body['error'] ?? 'Lỗi không xác định';
+    if (body['data'] is Map && (body['data'] as Map).isNotEmpty) {
+      final errors = (body['data'] as Map).values.toList();
+      if (errors.isNotEmpty) {
+        errorMessage = errors.join(', ');
+      }
+    }
+    throw ApiException(response.statusCode, errorMessage, body);
+  }
+
+  /// GET request
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? queryParams,
+  }) async {
+    final uri = _buildUri(path, queryParams);
+    final response = await http.get(uri, headers: _getHeaders()).timeout(timeout);
+    return _handleResponse(response);
+  }
+
+  /// POST request
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Object? body,
+    Map<String, dynamic>? queryParams,
+  }) async {
+    final uri = _buildUri(path, queryParams);
+    final encoded = body != null ? jsonEncode(body) : '{}';
+    final response = await http
+        .post(uri, headers: _getHeaders(), body: encoded)
+        .timeout(timeout);
+    return _handleResponse(response);
+  }
+
+  /// PUT request
+  Future<Map<String, dynamic>> put(
+    String path, {
+    Object? body,
+  }) async {
+    final uri = _buildUri(path);
+    final encoded = body != null ? jsonEncode(body) : '{}';
+    final response = await http
+        .put(uri, headers: _getHeaders(), body: encoded)
+        .timeout(timeout);
+    return _handleResponse(response);
+  }
+
+  /// DELETE request
+  Future<Map<String, dynamic>> delete(String path) async {
+    final uri = _buildUri(path);
+    final response = await http.delete(uri, headers: _getHeaders()).timeout(timeout);
+    return _handleResponse(response);
+  }
+
+  /// POST request with file upload (multipart/form-data)
+  /// Dùng để upload ảnh mặt tiền
+  Future<Map<String, dynamic>> postMultipart(
+    String path, {
+    required Map<String, String> fields,
+    required List<File> files,
+    String fileFieldName = 'photo',
+  }) async {
+    final uri = _buildUri(path);
+    final request = http.MultipartRequest('POST', uri);
+
+    // Thêm headers (không bao gồm Content-Type vì Multipart tự thêm)
+    final headers = _getHeaders(needJson: false);
+    request.headers.addAll(headers);
+
+    // Thêm fields
+    request.fields.addAll(fields);
+
+    // Thêm files
+    for (var file in files) {
+      request.files.add(await http.MultipartFile.fromPath(fileFieldName, file.path));
+    }
+
+    final streamedResponse = await request.send().timeout(timeout);
+    final response = await http.Response.fromStream(streamedResponse);
+    return _handleResponse(response);
+  }
 }

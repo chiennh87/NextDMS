@@ -123,3 +123,34 @@ class OutletOnboardingSubmitted extends OutletOnboardingEvent {
 class OutletOnboardingReset extends OutletOnboardingEvent {
   const OutletOnboardingReset();
 }
+/// Ch?n Tier (Phân h?ng di?m bán - GOLD/SILVER/BRONZE)
+class OutletTierSelected extends OutletOnboardingEvent {
+  final ValueSetValueModel tier;
+  const OutletTierSelected(this.tier);
+  @override
+  List<Object?> get props => [tier];
+}
+
+// Enterprise Sync Events (Offline-First)
+
+class OutletDraftSavedLocally extends OutletOnboardingEvent {
+  final OutletCreateRequestDTO formData;
+  const OutletDraftSavedLocally(this.formData);
+  @override
+  List<Object?> get props => [formData];
+}
+
+class OutletSyncRequested extends OutletOnboardingEvent {
+  const OutletSyncRequested();
+}
+
+class OutletSyncRetryRequested extends OutletOnboardingEvent {
+  final String localId;
+  const OutletSyncRetryRequested(this.localId);
+  @override
+  List<Object?> get props => [localId];
+}
+
+class OutletOnboardingReset extends OutletOnboardingEvent {
+  const OutletOnboardingReset();
+}
