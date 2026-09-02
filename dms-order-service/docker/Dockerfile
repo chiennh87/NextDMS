@@ -1,6 +1,7 @@
 # Multi-stage Dockerfile for dms-order-service
 # Stage 1: Build the Go binary
-FROM golang:1.22-alpine AS builder
+FROM golang:1.27-alpine AS builder
+
 
 # Set working directory
 WORKDIR /app
@@ -9,7 +10,7 @@ WORKDIR /app
 RUN apk add --no-cache git ca-certificates tzdata
 
 # Copy go module files first (better caching)
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # Copy source code
@@ -23,10 +24,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w" \
     -trimpath \
     -o /app/bin/dms-order-service \
-    ./cmd/api
+    .
 
 # Stage 2: Create minimal runtime image
-FROM alpine:3.18
+#FROM alpine:3.18
+FROM alpine:latest
 
 # Install CA certificates and timezone data
 RUN apk --no-cache add ca-certificates tzdata curl

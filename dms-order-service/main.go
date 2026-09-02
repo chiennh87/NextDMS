@@ -3,15 +3,20 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"dms-order-service/internal/config"
+	orderhandler "dms-order-service/internal/delivery/http/v1"
 	"dms-order-service/internal/infra/cache"
 	"dms-order-service/internal/infra/queue"
-	"dms-order-service/internal/infra.repository"
-	"dms-order-service/internal.delivery.http.v1.order_handler"
+	"dms-order-service/internal/infra/repository"
+	"dms-order-service/internal/usecase/order"
 )
 
 // main là entrypoint chính của dịch vụ.
@@ -42,17 +47,15 @@ func main() {
 	}
 
 	// Use case (single instance, stateless)
-	useCase, err := order.NewOrderUseCase(repo, cache, queue)
-	if err != nil {
-		log.Fatalf("Failed to create order use case: %v", err)
-	}
+	useCase := order.NewOrderUseCase(repo, cache, queue)
 
 	// 3. Xây dựng router
-	router := router.NewRouter(
-		useCase:    useCase,
-		handler:    order_handler.NewOrderHandler(useCase),
-		port:        cfg.HTTPPort,
-	)
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "alive"})
+	})
+	router.POST("/api/v1/orders", orderhandler.NewOrderHandler(useCase).CreateOrder)
 
 	// 4. Main loop (Graceful shutdown)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,14 +63,14 @@ func main() {
 
 	// Listen on HTTP server
 	server := &http.Server{
-		Addr:         ":" + cfg.HTTPPort,
-		Handler:      router,
+		Addr:    cfg.HTTPPort,
+		Handler: router,
 	}
 
 	// Start server
 	go func() {
 		log.Println("🚀 Server starting on port", cfg.HTTPPort)
-		if err := server.ListenAndServe(); err != nil && !ctx.Err() {
+		if err := server.ListenAndServe(); err != nil && ctx.Err() == nil {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
@@ -78,13 +81,14 @@ func main() {
 	<-sigChan
 
 	log.Println("🛑 Shutdown signal received, shutting down...")
-	ctx.Stop()
+	cancel()
 
 	// Graceful shutdown: wait 5 seconds cho connections đang hoạt động
-	time.Sleep(5 * time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
 
 	// Force close if still running
-	if err := server.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
 

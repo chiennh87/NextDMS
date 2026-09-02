@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gin-gonic/gin"
@@ -13,20 +14,9 @@ func SentryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Start a new span/transaction for this request
 		hub := sentry.NewHub(sentry.CurrentHub().Client(), sentry.NewScope())
-		
+
 		// Store the hub in the context for later use
 		c.Set("sentry_hub", hub)
-		
-		// Create a transaction
-		transaction := hub.StartTransaction(
-			fmt.Sprintf("%s %s", c.Request.Method, c.FullPath()),
-			sentry.TransactionFromContext(c.Request.Context()),
-		)
-		
-		// Update the request context with the transaction
-		c.Request = c.Request.WithContext(
-			sentry.SetTransactionOnContext(c.Request.Context(), transaction),
-		)
 
 		// Process request
 		c.Next()
@@ -42,8 +32,6 @@ func SentryMiddleware() gin.HandlerFunc {
 			hub.CaptureMessage(fmt.Sprintf("Server error: %d", c.Writer.Status()))
 		}
 
-		// Finish the transaction
-		transaction.Finish()
 	}
 }
 
@@ -72,16 +60,6 @@ func InitSentry(dsn, environment string, sampleRate float64) error {
 		// BeforeSend hook for filtering
 		BeforeSend: func(event *sentry.Event, hint *sentry.EventHint) *sentry.Event {
 			// Filter out health check errors
-			if hint != nil && hint.Request != nil {
-				if hint.Request.URL.Path == "/healthz" || hint.Request.URL.Path == "/readyz" {
-					return nil
-				}
-			}
-			return event
-		},
-		// BeforeSendTransaction hook
-		BeforeSendTransaction: func(event *sentry.TransactionEvent, hint *sentry.EventHint) *sentry.TransactionEvent {
-			// Filter out health check transactions
 			if hint != nil && hint.Request != nil {
 				if hint.Request.URL.Path == "/healthz" || hint.Request.URL.Path == "/readyz" {
 					return nil
@@ -120,23 +98,28 @@ func CaptureError(c *gin.Context, err error, context map[string]interface{}) {
 func CaptureMessage(c *gin.Context, message string, level sentry.Level) {
 	if hub, exists := c.Get("sentry_hub"); exists {
 		if h, ok := hub.(*sentry.Hub); ok {
-			h.CaptureMessage(message, level)
+			h.WithScope(func(scope *sentry.Scope) {
+				scope.SetLevel(level)
+				h.CaptureMessage(message)
+			})
 		}
 	}
 }
 
 // Flush sends all pending events to Sentry
 func FlushSentry(timeoutSeconds int) bool {
-	return sentry.Flush(timeoutSeconds * 1000)
+	return sentry.Flush(time.Duration(timeoutSeconds) * time.Second)
 }
 
 // SetUser sets user information in Sentry
 func SetUser(c *gin.Context, userID, email string) {
 	if hub, exists := c.Get("sentry_hub"); exists {
 		if h, ok := hub.(*sentry.Hub); ok {
-			h.SetUser(sentry.User{
-				ID:    userID,
-				Email: email,
+			h.ConfigureScope(func(scope *sentry.Scope) {
+				scope.SetUser(sentry.User{
+					ID:    userID,
+					Email: email,
+				})
 			})
 		}
 	}

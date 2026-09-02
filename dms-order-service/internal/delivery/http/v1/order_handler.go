@@ -7,19 +7,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 
-	"dms-order-service/internal/domain/order"
-	"dms-order-service/internal/usecase/order"
+	domainorder "dms-order-service/internal/domain/order"
+	orderusecase "dms-order-service/internal/usecase/order"
 )
 
 // OrderHandler xử lý các request đối với endpoint /api/v1/orders.
 // Sử dụng Gin framework cho tốc độ cao và support CORS, middleware tốt.
 type OrderHandler struct {
-	useCase    order.UseCase
-	validate   *validator.Validate
+	useCase  orderusecase.UseCase
+	validate *validator.Validate
 }
 
 // NewOrderHandler khởi tạo handler với UseCase và validator.
-func NewOrderHandler(u order.UseCase) *OrderHandler {
+func NewOrderHandler(u orderusecase.UseCase) *OrderHandler {
 	return &OrderHandler{
 		useCase:  u,
 		validate: validator.New(),
@@ -31,13 +31,13 @@ func NewOrderHandler(u order.UseCase) *OrderHandler {
 // - Gọi UseCase kiểm tra tồn kho, lưu DB, gửi Kafka event.
 // - Map lỗi nghiệp vụ sang đúng HTTP status.
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
-	var input order.CreateOrderInput
+	var input orderusecase.CreateOrderInput
 
 	// 1. Bind và validate JSON body
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Dữ liệu đầu vào không hợp lệ",
-			"detail":  err.Error(),
+			"error":  "Dữ liệu đầu vào không hợp lệ",
+			"detail": err.Error(),
 		})
 		return
 	}
@@ -45,8 +45,8 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	// 2. Validate struct tags (gin không tự động validate tag "validate")
 	if err := h.validate.Struct(input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Dữ liệu đầu vào không hợp lệ",
-			"detail":  formatValidationErrors(err),
+			"error":  "Dữ liệu đầu vào không hợp lệ",
+			"detail": formatValidationErrors(err),
 		})
 		return
 	}
@@ -78,15 +78,15 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 // - Các lỗi khác -> 500 Internal Server Error.
 func (h *OrderHandler) handleUseCaseError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, order.ErrOutOfStock):
+	case errors.Is(err, domainorder.ErrOutOfStock):
 		c.JSON(http.StatusConflict, gin.H{
-			"error":   "Tồn kho không đủ",
-			"detail":  err.Error(),
+			"error":  "Tồn kho không đủ",
+			"detail": err.Error(),
 		})
-	case errors.Is(err, order.ErrValidation):
+	case errors.Is(err, domainorder.ErrEmptyItems):
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Dữ liệu không hợp lệ",
-			"detail":  err.Error(),
+			"error":  "Dữ liệu không hợp lệ",
+			"detail": err.Error(),
 		})
 	default:
 		// Log chi tiết lỗi server (Internal error) cho team giám sát.

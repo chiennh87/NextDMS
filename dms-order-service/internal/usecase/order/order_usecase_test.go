@@ -11,9 +11,9 @@ import (
 	"dms-order-service/internal/domain/order"
 )
 
-func validSalesmanID() string { return "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-func validOutletID() string   { return "b1c2d3e4-f5a6-7890-bcde-f12345678901" }
-func validSKUID() string      { return "c1d2e3f4-a5b6-7890-cdef-123456789012" }
+func validSalesmanID() string { return "a1b2c3d4-e5f6-4890-abcd-ef1234567890" }
+func validOutletID() string   { return "b1c2d3e4-f5a6-4890-bcde-f12345678901" }
+func validSKUID() string      { return "c1d2e3f4-a5b6-4890-8def-123456789012" }
 
 // Test successful order creation
 func TestCreateOrder_Success(t *testing.T) {
@@ -190,8 +190,8 @@ func TestCreateOrder_MultipleItems(t *testing.T) {
 		OutletID:   validOutletID(),
 		Items: []order.OrderItem{
 			{SKUID: validSKUID(), Quantity: 2, Price: 100.0},
-			{SKUID: "d1e2f3a4-b5c6-7890-def1-234567890123", Quantity: 1, Price: 200.0},
-			{SKUID: "e1f2a3b4-c5d6-7890-ef12-345678901234", Quantity: 3, Price: 50.0},
+			{SKUID: "d1e2f3a4-b5c6-4890-8ef1-234567890123", Quantity: 1, Price: 200.0},
+			{SKUID: "e1f2a3b4-c5d6-4890-8f12-345678901234", Quantity: 3, Price: 50.0},
 		},
 		GPSLat:  13.0,
 		GPSLong: 103.0,

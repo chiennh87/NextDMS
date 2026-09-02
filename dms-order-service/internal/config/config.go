@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -48,7 +47,7 @@ type Config struct {
 // an toàn để service có thể chạy được ngay cả khi không có .env.
 func Load() (*Config, error) {
 	c := &Config{
-		HTTPPort:           ":" + envIntDefault("PORT", 8080),
+		HTTPPort:           ":" + strconv.Itoa(envIntDefault("PORT", 8080)),
 		PostgresDSN:        envOrDefault("POSTGRES_DSN", "host=localhost user=postgres password=postgres dbname=dms_sslmode=disable"),
 		RedisAddr:          envOrDefault("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
@@ -81,11 +80,13 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
-func envIntDefault(key string, def int) string {
+func envIntDefault(key string, def int) int {
 	if v, ok := os.LookupEnv(key); ok {
-		return v
+		if value, err := strconv.Atoi(v); err == nil {
+			return value
+		}
 	}
-	return strconv.Itoa(def)
+	return def
 }
 
 func envFloatDefault(key string, def float64) float64 {

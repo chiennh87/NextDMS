@@ -1,0 +1,100 @@
+﻿<!DOCTYPE html>
+<html lang=vi>
+<head>
+<meta charset=UTF-8>
+<meta name=viewport content=width=device-width,initial-scale=1.0>
+<title>DMS Sales - Login Demo</title>
+<link rel=stylesheet href=style.css>
+</head>
+<body>
+<div class=app>
+<div class=status-bar><span id=time>9:41</span><span class=status-icons><span id=netIcon>📶</span><span id=batIcon>🔋</span></span></div>
+<div class=app-content id=appContent>
+<div class=screen active id=loginScreen>
+<div class=logo><div class=logo-icon>📦</div><h1>DMS Sales</h1><p class=subtitle>FMCG Distribution</p></div>
+<div class=login-tabs><button class=tab-btn.active data-tab=online onclick=switchLoginTab('online')>Online</button><button class=tab-btn data-tab=offline onclick=switchLoginTab('offline')>Offline PIN</button></div>
+<form id=onlineForm class=login-form onsubmit=handleOnlineLogin(event)>
+<div class=input-group><label>Tài khoản</label><input type=text id=username value=sales01 placeholder=Username required></div>
+<div class=input-group><label>Mật khẩu</label><div class=password-wrap><input type=password id=password value=Sales@123 placeholder=Nhập mật khẩu required><button type=button class=eye-btn onclick="togglePassword('password')">👁</button></div></div>
+<div class=input-group><label>Device ID</label><input type=text id=deviceId value=DEV-001 readonly></div>
+<button type=submit class=btn-primary id=loginBtn><span class=btn-text>Đăng Nhập</span><span class=btn-loader style=display:none>⏳</span></button>
+<div class=form-footer><a href=# onclick="showScreen('forgotScreen');return false">Quên mật khẩu?</a></div>
+</form>
+<form id=offlineForm class=login-form style=display:none onsubmit=handleOfflineLogin(event)>
+<div class=offline-badge>📵 Chế độ Offline</div>
+<div class=input-group><label>Tài khoản</label><input type=text id=offUsername value=sales01 required></div>
+<div class=input-group><label>Nhập PIN 6 số</label>
+<div class=pin-display id=pinDisplay><span class=pin-dot></span><span class=pin-dot></span><span class=pin-dot></span><span class=pin-dot></span><span class=pin-dot></span><span class=pin-dot></span></div>
+<div class=keypad>
+<button type=button class=key onclick=pinKey('1')>1</button><button type=button class=key onclick=pinKey('2')>2</button><button type=button class=key onclick=pinKey('3')>3</button>
+<button type=button class=key onclick=pinKey('4')>4</button><button type=button class=key onclick=pinKey('5')>5</button><button type=button class=key onclick=pinKey('6')>6</button>
+<button type=button class=key onclick=pinKey('7')>7</button><button type=button class=key onclick=pinKey('8')>8</button><button type=button class=key onclick=pinKey('9')>9</button>
+<button type=button class=key onclick=pinClear()>⌫</button><button type=button class=key onclick=pinKey('0')>0</button><button type=button class=key.empty></button>
+</div></div>
+<button type=submit class=btn-primary>Đăng Nhập Offline</button>
+</form>
+</div>
+<div class=screen id=forgotScreen>
+<button class=back-btn onclick=showScreen('loginScreen')>← Quay lại</button>
+<div class=step-indicator><div class=step.active id=step1>1<br><span>Email</span></div><div class=step-line id=line1></div><div class=step id=step2>2<br><span>OTP</span></div><div class=step-line id=line2></div><div class=step id=step3>3<br><span>MK</span></div></div>
+<div class=step-content.active id=fpStep1>
+<div class=icon-circle>📧</div><h2>Quên Mật Khẩu</h2><p class=muted>Nhập email đã đăng ký để nhận mã OTP</p>
+<div class=input-group><label>Email</label><input type=email id=forgotEmail placeholder=email@example.com value=sales01@dms.local></div>
+<button class=btn-primary onclick=requestOTP()>Gửi Mã OTP</button>
+</div>
+<div class=step-content id=fpStep2>
+<div class=icon-circle>🔐</div><h2>Nhập Mã OTP</h2><p class=muted>Mã OTP đã gửi đến <span id=sentEmail>email</span></p>
+<div class=otp-display id=otpDisplay>
+<input type=text maxlength=1 class=otp-box data-idx=0><input type=text maxlength=1 class=otp-box data-idx=1><input type=text maxlength=1 class=otp-box data-idx=2>
+<input type=text maxlength=1 class=otp-box data-idx=3><input type=text maxlength=1 class=otp-box data-idx=4><input type=text maxlength=1 class=otp-box data-idx=5>
+</div>
+<p class=countdown-line>Gửi lại sau <span id=countdown>60</span>s</p>
+<button class=btn-link id=resendBtn onclick=resendOTP() disabled>Gửi lại OTP</button>
+<button class=btn-primary onclick=verifyOTP()>Xác Nhận</button>
+<button class=btn-link onclick=goToStep(1)>← Nhập lại email</button>
+</div>
+<div class=step-content id=fpStep3>
+<div class=icon-circle>🔑</div><h2>Đặt Mật Khẩu Mới</h2>
+<div class=input-group><label>Mật khẩu mới</label><div class=password-wrap><input type=password id=newPassword placeholder=Tối thiểu 8 ký tự oninput=checkStrength()><button type=button class=eye-btn onclick="togglePassword('newPassword')">👁</button></div>
+<div class=strength-bar id=strengthBar><div class=strength-segment></div><div class=strength-segment></div><div class=strength-segment></div><div class=strength-segment></div></div>
+<div class=strength-label id=strengthLabel></div></div>
+<div class=input-group><label>Xác nhận mật khẩu</label><div class=password-wrap><input type=password id=confirmPassword placeholder=Nhập lại mật khẩu oninput=checkMatch()><button type=button class=eye-btn onclick="togglePassword('confirmPassword')">👁</button></div><div class=hint id=matchHint style=display:none>Mật khẩu không khớp</div></div>
+<button class=btn-primary id=resetBtn onclick=resetPassword()>Đặt Lại Mật Khẩu</button>
+</div>
+</div>
+<div class=screen id=homeScreen>
+<div class=home-header><div class=home-title><h2>Xin chào, Nguyễn Văn A 👋</h2><p class=muted>Salesman • Mã NV: sales01</p></div><button class=profile-btn onclick=showScreen('profileScreen')>👤</button></div>
+<div class=dashboard-grid>
+<div class=dash-card><div class=dash-icon>📋</div><div class=dash-value>12</div><div class=dash-label>Đơn hàng hôm nay</div></div>
+<div class=dash-card><div class=dash-icon>🏪</div><div class=dash-value>28/35</div><div class=dash-label>Đại lý đã ghé</div></div>
+<div class=dash-card><div class=dash-icon>💰</div><div class=dash-value>15.2M</div><div class=dash-label>Doanh thu</div></div>
+<div class=dash-card><div class=dash-icon>📦</div><div class=dash-value>3</div><div class=dash-label>Đơn chờ xử lý</div></div>
+</div>
+<div class=quick-actions>
+<button class=action-btn onclick=showToast('Tính năng đang phát triển')><div class=action-icon>🛒</div><span>Tạo đơn</span></button>
+<button class=action-btn onclick=showToast('Tính năng đang phát triển')><div class=action-icon>📍</div><span>Check-in</span></button>
+<button class=action-btn onclick=showToast('Tính năng đang phát triển')><div class=action-icon>📊</div><span>Báo cáo</span></button>
+<button class=action-btn onclick=showScreen('profileScreen')><div class=action-icon>⚙️</div><span>Cài đặt</span></button>
+</div>
+</div>
+<div class=screen id=profileScreen>
+<button class=back-btn onclick=showScreen('homeScreen')>← Quay lại</button>
+<h2 style=margin-top:20px>Cài đặt</h2>
+<div class=profile-card><div class=avatar>👤</div><div><div class=profile-name>Nguyễn Văn A</div><div class=profile-email>sales01@dms.local</div></div></div>
+<div class=settings-list>
+<div class=settings-item onclick=showScreen('forgotScreen')><span class=settings-icon>🔑</span><span>Đổi mật khẩu</span><span class=chevron>›</span></div>
+<div class=settings-item onclick=showToast('Đã đồng bộ dữ liệu offline')><span class=settings-icon>🔄</span><span>Đồng bộ dữ liệu</span><span class=chevron>›</span></div>
+<div class=settings-item onclick=showToast('Ngôn ngữ: Tiếng Việt')><span class=settings-icon>🌐</span><span>Ngôn ngữ</span><span class=chevron>›</span></div>
+</div>
+<div class=logout-section>
+<button class=btn-logout onclick=confirmLogout(false)>🚪 Đăng xuất</button>
+<button class=btn-logout-all onclick=confirmLogout(true)>📱 Đăng xuất khỏi tất cả thiết bị</button>
+</div>
+</div>
+</div>
+<div class=toast id=toast></div>
+<div class=modal id=modal><div class=modal-content><h3 id=modalTitle>Xác nhận</h3><p id=modalMessage></p><div class=modal-actions><button class=btn-secondary onclick=closeModal()>Hủy</button><button class=btn-danger id=modalConfirm>Xác nhận</button></div></div></div>
+</div>
+<script src=app.js></script>
+</body>
+</html>

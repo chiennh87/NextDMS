@@ -58,12 +58,13 @@ func (u *orderUseCase) CreateOrder(ctx context.Context, input CreateOrderInput) 
 	ctx, cancel := context.WithTimeout(ctx, u.timeout)
 	defer cancel()
 
+	if len(input.Items) == 0 {
+		return nil, order.ErrEmptyItems
+	}
+
 	// 1. Validate đầu vào theo struct tag (required, uuid4, gt=0, ...)
 	if err := u.validate.Struct(input); err != nil {
 		return nil, fmt.Errorf("dữ liệu không hợp lệ: %w", err)
-	}
-	if len(input.Items) == 0 {
-		return nil, order.ErrEmptyItems
 	}
 
 	// 2. Kiểm tra tồn kho từ Redis Cache (ưu tiên hiệu năng cao giờ cao điểm)
@@ -118,4 +119,3 @@ func (u *orderUseCase) CreateOrder(ctx context.Context, input CreateOrderInput) 
 
 	return newOrder, nil
 }
-

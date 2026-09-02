@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dms-order-service/internal/domain/order"
 )
@@ -14,24 +16,24 @@ import (
 // postgresOrderRepository implement order.Repository interface, lưu đơn hàng
 // vào PostgreSQL bằng pgx (driver chuẩn, hỗ trợ connection pool).
 type postgresOrderRepository struct {
-	db *pgx.Pool
+	db *pgxpool.Pool
 }
 
 // NewPostgresOrderRepository tạo pool kết nối PG. Pool được thiết kế để
 // tối ưu cho traffic cao: 1 pool chia sẻ cho toàn bộ instance (stateless),
 // không mở kết nối mới cho mỗi request.
 func NewPostgresOrderRepository(dsn string) (*postgresOrderRepository, error) {
-	cfg, err := pgx.ParseConfig(dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres DSN: %w", err)
 	}
 	// Tối ưu pool cho traffic cao (1000 salesman, 100k outlets, peak 8h-10h)
 	cfg.MaxConns = 50
 	cfg.MinConns = 10
-	cfg.ConnConfig.ConnectTimeout = 5
-	cfg.ConnConfig.ApplicationName = "dms-order-service"
+	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
+	cfg.ConnConfig.RuntimeParams["application_name"] = "dms-order-service"
 
-	pool, err := pgx.NewPoolWithConfig(context.Background(), cfg)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create postgres pool: %w", err)
 	}
@@ -46,7 +48,7 @@ func (r *postgresOrderRepository) Create(ctx context.Context, o *order.Order) er
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
 	// 1. Insert orders
 	const qOrder = `

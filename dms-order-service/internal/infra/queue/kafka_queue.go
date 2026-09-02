@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 
@@ -29,26 +30,14 @@ func NewKafkaQueue(brokers []string, topic string) (*kafkaQueue, error) {
 		return nil, fmt.Errorf("ít nhất 1 broker Kafka là bắt buộc")
 	}
 	writer := &kafka.Writer{
-		Brokers:  brokers,
-		Topic:    topic,
-		Balancer: &kafka.LeastBytes{}, // Phân phối message đồng đều qua partition
-		AsyncClose: true,
-		Batch: kafka.BatchConfig{
-			Size:  16384,     // 16KB
-			Count: 500,      // Gom tối đa 500 messages trước khi flush
-			Timeout: 10 * time.Millisecond,
-		},
-		Batch.Flush.Bytes:  10 << 20, // 10MB tối đa trước khi flush
-		Batch.Flush.Messages: 5000,
-		Batch.Flush.Frequency: 10 * time.Millisecond,
+		Addr:         kafka.TCP(brokers...),
+		Topic:        topic,
+		Balancer:     &kafka.LeastBytes{}, // Phân phối message đồng đều qua partition
+		Async:        true,
+		BatchSize:    500,
+		BatchTimeout: 10 * time.Millisecond,
 		RequiredAcks: kafka.RequireAll, // Đảm bảo message không bị mất
 		Compression:  kafka.Snappy,     // Snappy cho throughput cao
-	}
-	// Kiểm tra kết nối
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := writer.Open(ctx); err != nil {
-		return nil, fmt.Errorf("mở Kafka writer: %w", err)
 	}
 	return &kafkaQueue{writer: writer, topic: topic}, nil
 }
